@@ -1,5 +1,4 @@
-// PSA cert data as returned by our Firebase Function proxy to api.psacard.com/publicapi
-// Field names match PSA's documented public API response.
+// PSA cert data as returned by our homelab backend proxy to api.psacard.com/publicapi
 export interface PSAImage {
   IsFront: boolean;
   ImageURL: string;
@@ -20,18 +19,16 @@ export interface PSACert {
   PSAImages: PSAImage[];
 }
 
-export interface CertLookupResult {
-  cert: PSACert;
-  frontStorageUrl: string | null;
-  backStorageUrl: string | null;
+const API_BASE = (import.meta.env.VITE_API_BASE_URL as string) ?? "";
+const API_TOKEN = import.meta.env.VITE_API_TOKEN as string;
+
+function authHeaders(): Record<string, string> {
+  return { Authorization: `Bearer ${API_TOKEN}` };
 }
 
-const FUNCTIONS_BASE = (import.meta.env.VITE_FUNCTIONS_BASE_URL as string) ?? "";
-
-export async function lookupCert(certNumber: string, idToken: string): Promise<PSACert> {
-  const url = `${FUNCTIONS_BASE}/lookupCert?cert=${encodeURIComponent(certNumber.trim())}`;
-  const res = await fetch(url, {
-    headers: { Authorization: `Bearer ${idToken}` },
+export async function lookupCert(certNumber: string): Promise<PSACert> {
+  const res = await fetch(`${API_BASE}/v1/cert/${encodeURIComponent(certNumber.trim())}`, {
+    headers: authHeaders(),
   });
   if (!res.ok) {
     const text = await res.text();
@@ -43,16 +40,10 @@ export async function lookupCert(certNumber: string, idToken: string): Promise<P
 
 export async function fetchAndStoreImages(
   certNumber: string,
-  idToken: string,
 ): Promise<{ frontUrl: string | null; backUrl: string | null }> {
-  const url = `${FUNCTIONS_BASE}/fetchImages`;
-  const res = await fetch(url, {
+  const res = await fetch(`${API_BASE}/v1/cert/${encodeURIComponent(certNumber)}/images`, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${idToken}`,
-    },
-    body: JSON.stringify({ certNumber }),
+    headers: authHeaders(),
   });
   if (!res.ok) {
     const text = await res.text();
@@ -61,7 +52,6 @@ export async function fetchAndStoreImages(
   return res.json() as Promise<{ frontUrl: string | null; backUrl: string | null }>;
 }
 
-// Build a suggested eBay title from PSA cert data (80-char eBay limit)
 export function buildTitle(cert: PSACert): string {
   const parts = [
     cert.Year,
@@ -74,7 +64,6 @@ export function buildTitle(cert: PSACert): string {
 
   let title = parts.join(" ");
   if (title.length > 80) {
-    // Drop set name first to trim
     const trimmed = [cert.Year, cert.Brand, cert.Subject, cert.CardNumber ? `#${cert.CardNumber}` : "", `PSA ${cert.CardGrade}`]
       .filter(Boolean)
       .join(" ");
@@ -83,7 +72,6 @@ export function buildTitle(cert: PSACert): string {
   return title;
 }
 
-// Build a plain-text description block for eBay
 export function buildDescription(cert: PSACert): string {
   return [
     `${cert.Brand} ${cert.Subject}`,

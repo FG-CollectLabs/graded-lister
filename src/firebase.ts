@@ -7,7 +7,6 @@ import {
   signOut,
   type User,
 } from "firebase/auth";
-import { getStorage } from "firebase/storage";
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY as string,
@@ -20,7 +19,6 @@ const firebaseConfig = {
 
 const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
-export const storage = getStorage(app);
 
 const provider = new GoogleAuthProvider();
 
@@ -31,12 +29,6 @@ export async function signInWithGoogle(): Promise<User> {
 
 export async function signOutUser(): Promise<void> {
   await signOut(auth);
-}
-
-export async function getIdToken(): Promise<string> {
-  const user = auth.currentUser;
-  if (!user) throw new Error("Not signed in");
-  return user.getIdToken();
 }
 
 export { onAuthStateChanged, type User };

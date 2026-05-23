@@ -1,5 +1,4 @@
 import { useState } from "react";
-import { getIdToken } from "../firebase";
 import { lookupCert, fetchAndStoreImages, type PSACert } from "../lib/psa";
 
 interface Props {
@@ -25,15 +24,11 @@ export default function CertLookup({ onReady }: Props) {
     setPhase("looking-up");
 
     try {
-      const token = await getIdToken();
-
-      // Step 1: fetch cert data
-      const psaCert = await lookupCert(certInput, token);
+      const psaCert = await lookupCert(certInput);
       setCert(psaCert);
       setPhase("fetching-images");
 
-      // Step 2: download images → Firebase Storage
-      const { frontUrl: fUrl, backUrl: bUrl } = await fetchAndStoreImages(psaCert.CertNumber, token);
+      const { frontUrl: fUrl, backUrl: bUrl } = await fetchAndStoreImages(psaCert.CertNumber);
       setFrontUrl(fUrl);
       setBackUrl(bUrl);
       setPhase("done");
@@ -53,7 +48,6 @@ export default function CertLookup({ onReady }: Props) {
     <div className="page">
       <h1 className="page-title">PSA Cert Lookup</h1>
 
-      {/* ── Lookup form ─────────────────────────────────────────── */}
       <div className="card">
         <div className="lookup-form">
           <div className="form-group">
@@ -84,16 +78,13 @@ export default function CertLookup({ onReady }: Props) {
         )}
       </div>
 
-      {/* ── Error ───────────────────────────────────────────────── */}
       {error && <div className="error-banner">{error}</div>}
 
-      {/* ── Cert result ─────────────────────────────────────────── */}
       {cert && (
         <div className="card">
           <div className="card-title">PSA Certification Details</div>
 
           <div style={{ display: "flex", gap: 24, flexWrap: "wrap" }}>
-            {/* Images */}
             <div className="image-strip">
               {frontUrl ? (
                 <img className="image-thumb" src={frontUrl} alt="Card front" />
@@ -111,7 +102,6 @@ export default function CertLookup({ onReady }: Props) {
               )}
             </div>
 
-            {/* Details */}
             <div style={{ flex: 1, minWidth: 220 }}>
               <div className="cert-grid">
                 <div className="cert-field">
@@ -154,10 +144,7 @@ export default function CertLookup({ onReady }: Props) {
 
           {phase === "done" && (
             <div style={{ marginTop: 20, display: "flex", justifyContent: "flex-end" }}>
-              <button
-                className="btn btn-primary"
-                onClick={() => onReady(cert, frontUrl, backUrl)}
-              >
+              <button className="btn btn-primary" onClick={() => onReady(cert, frontUrl, backUrl)}>
                 Build eBay Listing →
               </button>
             </div>
