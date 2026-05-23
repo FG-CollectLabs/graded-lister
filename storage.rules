@@ -1,0 +1,10 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    // Only authenticated users with the owner email can read/write graded-lister images
+    match /graded-lister/{allPaths=**} {
+      allow read: if request.auth != null && request.auth.token.email == "fglabs.contact@gmail.com";
+      allow write: if request.auth != null && request.auth.token.email == "fglabs.contact@gmail.com";
+    }
+  }
+}

@@ -1,0 +1,8 @@
+node_modules
+dist
+.env.local
+functions/.env
+functions/.env.local
+functions/lib
+functions/node_modules
+.firebase
