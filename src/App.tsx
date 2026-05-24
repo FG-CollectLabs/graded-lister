@@ -1,12 +1,13 @@
 import { useEffect, useState } from "react";
 import { auth, onAuthStateChanged, signInWithGoogle, signOutUser, type User } from "./firebase";
 import CertLookup from "./pages/CertLookup";
+import Decision from "./pages/Decision";
 import ListingBuilder from "./pages/ListingBuilder";
 import type { PSACert } from "./lib/psa";
 
 const OWNER_EMAIL = import.meta.env.VITE_OWNER_EMAIL;
 
-type View = "lookup" | "listing";
+type View = "lookup" | "decision" | "listing";
 
 interface ListingState {
   cert: PSACert;
@@ -91,6 +92,14 @@ export default function App() {
             PSA Lookup
           </button>
           <button
+            className={`status-tab${view === "decision" ? " active" : ""}`}
+            onClick={() => { if (listing) setView("decision"); }}
+            disabled={!listing}
+            title={!listing ? "Look up a cert first" : undefined}
+          >
+            Decision
+          </button>
+          <button
             className={`status-tab${view === "listing" ? " active" : ""}`}
             onClick={() => { if (listing) setView("listing"); }}
             disabled={!listing}
@@ -110,15 +119,23 @@ export default function App() {
           <CertLookup
             onReady={(cert, frontUrl, backUrl) => {
               setListing({ cert, frontUrl, backUrl });
-              setView("listing");
+              setView("decision");
             }}
           />
-        ) : listing ? (
+        ) : listing && view === "decision" ? (
+          <Decision
+            cert={listing.cert}
+            frontUrl={listing.frontUrl}
+            backUrl={listing.backUrl}
+            onNext={() => setView("listing")}
+            onBack={() => setView("lookup")}
+          />
+        ) : listing && view === "listing" ? (
           <ListingBuilder
             cert={listing.cert}
             frontUrl={listing.frontUrl}
             backUrl={listing.backUrl}
-            onBack={() => setView("lookup")}
+            onBack={() => setView("decision")}
           />
         ) : null}
       </main>
