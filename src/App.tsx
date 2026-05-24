@@ -3,11 +3,12 @@ import { auth, onAuthStateChanged, signInWithGoogle, signOutUser, type User } fr
 import CertLookup from "./pages/CertLookup";
 import Decision from "./pages/Decision";
 import ListingBuilder from "./pages/ListingBuilder";
+import Ventures from "./pages/Ventures";
 import type { PSACert } from "./lib/psa";
 
 const OWNER_EMAIL = import.meta.env.VITE_OWNER_EMAIL;
 
-type View = "lookup" | "decision" | "listing";
+type View = "lookup" | "decision" | "listing" | "ventures";
 
 interface ListingState {
   cert: PSACert;
@@ -92,6 +93,12 @@ export default function App() {
             PSA Lookup
           </button>
           <button
+            className={`status-tab${view === "ventures" ? " active" : ""}`}
+            onClick={() => setView("ventures")}
+          >
+            Ventures
+          </button>
+          <button
             className={`status-tab${view === "decision" ? " active" : ""}`}
             onClick={() => { if (listing) setView("decision"); }}
             disabled={!listing}
@@ -115,7 +122,9 @@ export default function App() {
       </header>
 
       <main style={{ gridArea: "nav / nav / main / main", overflow: "hidden", display: "flex", flexDirection: "column" }}>
-        {view === "lookup" ? (
+        {view === "ventures" ? (
+          <Ventures />
+        ) : view === "lookup" ? (
           <CertLookup
             onReady={(cert, frontUrl, backUrl) => {
               setListing({ cert, frontUrl, backUrl });
