@@ -4,6 +4,7 @@ import {
   resolveCard,
   fetchSignals,
   fetchAggregate,
+  fetchPriorReview,
   submitReview,
   formatCents,
   regradeEV,
@@ -11,7 +12,9 @@ import {
   type CardSignals,
   type ReviewAggregate,
   type ReviewClassification,
+  type PriorReview,
 } from "../lib/tracker";
+import type { CreateVentureParams } from "../lib/ventures";
 
 interface Props {
   cert: PSACert;
@@ -19,6 +22,7 @@ interface Props {
   backUrl: string | null;
   onNext: () => void;
   onBack: () => void;
+  onLogPurchase: (prefill: Partial<CreateVentureParams>) => void;
 }
 
 const SUBGRADE_MARKS = [5, 5.5, 6, 6.5, 7, 7.5, 8, 8.5, 9, 9.5, 10];
@@ -56,10 +60,11 @@ function SubgradeSlider({
   );
 }
 
-export default function Decision({ cert, frontUrl, backUrl, onNext, onBack }: Props) {
+export default function Decision({ cert, frontUrl, backUrl, onNext, onBack, onLogPurchase }: Props) {
   const [resolve, setResolve] = useState<ResolveResult | null>(null);
   const [signals, setSignals] = useState<CardSignals | null>(null);
   const [aggregate, setAggregate] = useState<ReviewAggregate | null>(null);
+  const [priorReview, setPriorReview] = useState<PriorReview | null | "loading">("loading");
   const [loadError, setLoadError] = useState<string | null>(null);
 
   // Review form
@@ -81,26 +86,31 @@ export default function Decision({ cert, frontUrl, backUrl, onNext, onBack }: Pr
     loadedRef.current = true;
 
     void (async () => {
-      try {
-        const res = await resolveCard(
-          cert.CertNumber,
-          cert.Subject,
-          cert.VarietySet,
-          cert.CardNumber || undefined,
-        );
-        setResolve(res);
+      // Fetch prior review and resolve in parallel.
+      const [resolveResult, priorResult] = await Promise.allSettled([
+        resolveCard(cert.CertNumber, cert.Subject, cert.VarietySet, cert.CardNumber || undefined),
+        fetchPriorReview(cert.CertNumber),
+      ]);
 
-        const top = res.candidates[0];
-        if (top) {
-          const [sig, agg] = await Promise.allSettled([
-            fetchSignals(top.display_key),
-            fetchAggregate(top.card_id, "psa", cert.CardGrade),
-          ]);
-          if (sig.status === "fulfilled") setSignals(sig.value);
-          if (agg.status === "fulfilled") setAggregate(agg.value);
-        }
-      } catch (e) {
-        setLoadError((e as Error).message);
+      if (priorResult.status === "fulfilled") setPriorReview(priorResult.value);
+      else setPriorReview(null);
+
+      if (resolveResult.status === "rejected") {
+        setLoadError((resolveResult.reason as Error).message);
+        return;
+      }
+
+      const res = resolveResult.value;
+      setResolve(res);
+
+      const top = res.candidates[0];
+      if (top) {
+        const [sig, agg] = await Promise.allSettled([
+          fetchSignals(top.display_key),
+          fetchAggregate(top.card_id, "psa", cert.CardGrade),
+        ]);
+        if (sig.status === "fulfilled") setSignals(sig.value);
+        if (agg.status === "fulfilled") setAggregate(agg.value);
       }
     })();
   }, [cert]);
@@ -173,6 +183,36 @@ export default function Decision({ cert, frontUrl, backUrl, onNext, onBack }: Pr
         </div>
       )}
 
+      {/* ── Prior review ── */}
+      {priorReview && priorReview !== "loading" && (
+        <div style={{
+          padding: "8px 14px",
+          borderRadius: "var(--radius)",
+          background: "rgba(79,140,255,0.08)",
+          border: "1px solid rgba(79,140,255,0.2)",
+          fontSize: 12,
+          marginBottom: 16,
+          display: "flex",
+          alignItems: "center",
+          gap: 10,
+        }}>
+          <span style={{ color: "var(--text-dim)" }}>Your last review ({priorReview.review_date}):</span>
+          <span style={{ fontWeight: 600, color: classColor(priorReview.classification) }}>
+            {classLabel(priorReview.classification)}
+          </span>
+          {priorReview.centering != null && (
+            <span style={{ color: "var(--text-dim)" }}>
+              C{priorReview.centering} / Su{priorReview.surface} / E{priorReview.edges} / Co{priorReview.corners}
+            </span>
+          )}
+          {priorReview.notes && (
+            <span style={{ color: "var(--text-dim)", fontStyle: "italic", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              "{priorReview.notes}"
+            </span>
+          )}
+        </div>
+      )}
+
       {/* ── Market signals ── */}
       <div className="card" style={{ marginBottom: 16 }}>
         <div className="card-title" style={{ marginBottom: 12 }}>Market Signals</div>
@@ -239,10 +279,24 @@ export default function Decision({ cert, frontUrl, backUrl, onNext, onBack }: Pr
 
         {submitted ? (
           <div style={{ textAlign: "center", padding: "20px 0" }}>
-            <div style={{ color: "var(--good)", fontSize: 16, fontWeight: 600, marginBottom: 8 }}>✓ Review saved</div>
-            <button className="btn btn-primary" style={{ marginTop: 8 }} onClick={onNext}>
-              Build eBay Listing →
-            </button>
+            <div style={{ color: "var(--good)", fontSize: 16, fontWeight: 600, marginBottom: 12 }}>✓ Review saved</div>
+            <div style={{ display: "flex", gap: 10, justifyContent: "center", flexWrap: "wrap" }}>
+              <button
+                className="btn"
+                onClick={() => onLogPurchase({
+                  card_name: cert.Subject,
+                  set_code: topCard?.set_code ?? cert.VarietySet,
+                  card_number: cert.CardNumber || undefined,
+                  cert_number: cert.CertNumber,
+                  market_tracker_card_id: topCard?.card_id,
+                })}
+              >
+                Log as Purchase
+              </button>
+              <button className="btn btn-primary" onClick={onNext}>
+                Build eBay Listing →
+              </button>
+            </div>
           </div>
         ) : (
           <>
@@ -304,7 +358,19 @@ export default function Decision({ cert, frontUrl, backUrl, onNext, onBack }: Pr
               <div className="error-banner" style={{ marginBottom: 12 }}>{submitError}</div>
             )}
 
-            <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+            <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", flexWrap: "wrap" }}>
+              <button
+                className="btn btn-sm"
+                onClick={() => onLogPurchase({
+                  card_name: cert.Subject,
+                  set_code: topCard?.set_code ?? cert.VarietySet,
+                  card_number: cert.CardNumber || undefined,
+                  cert_number: cert.CertNumber,
+                  market_tracker_card_id: topCard?.card_id,
+                })}
+              >
+                Log as Purchase
+              </button>
               <button className="btn" onClick={onNext}>
                 Skip → List
               </button>

@@ -1,19 +1,26 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { lookupCert, fetchAndStoreImages, type PSACert } from "../lib/psa";
 
 interface Props {
+  initialCert?: string;
   onReady: (cert: PSACert, frontUrl: string | null, backUrl: string | null) => void;
 }
 
 type Phase = "idle" | "looking-up" | "fetching-images" | "done" | "error";
 
-export default function CertLookup({ onReady }: Props) {
-  const [certInput, setCertInput] = useState("");
+export default function CertLookup({ initialCert, onReady }: Props) {
+  const [certInput, setCertInput] = useState(initialCert ?? "");
   const [phase, setPhase] = useState<Phase>("idle");
   const [error, setError] = useState<string | null>(null);
   const [cert, setCert] = useState<PSACert | null>(null);
   const [frontUrl, setFrontUrl] = useState<string | null>(null);
   const [backUrl, setBackUrl] = useState<string | null>(null);
+
+  // Auto-trigger lookup when arriving from Ventures with a pre-filled cert.
+  useEffect(() => {
+    if (initialCert) void handleLookup();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleLookup = async () => {
     if (!certInput.trim()) return;

@@ -13,6 +13,7 @@ import {
   GRADING_COMPANIES,
   type Venture,
   type VentureStage,
+  type CreateVentureParams,
 } from "../lib/ventures";
 
 // ── Stage config ─────────────────────────────────────────────────────────────
@@ -33,12 +34,18 @@ const STAGE_COLOR: Record<VentureStage, string> = {
 
 // ── Main component ────────────────────────────────────────────────────────────
 
-export default function Ventures() {
+interface VenturesProps {
+  prefill?: Partial<CreateVentureParams>;
+  onRegradeAnalysis?: (cert: string) => void;
+}
+
+export default function Ventures({ prefill, onRegradeAnalysis }: VenturesProps) {
   const [ventures, setVentures] = useState<Venture[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const [showAdd, setShowAdd] = useState(false);
+  const [showAdd, setShowAdd] = useState(!!prefill);
+  const [addPrefill, setAddPrefill] = useState<Partial<CreateVentureParams> | undefined>(prefill);
   const [actionVenture, setActionVenture] = useState<Venture | null>(null);
   const [actionType, setActionType] = useState<"submit" | "result" | "sell" | null>(null);
 
@@ -83,7 +90,7 @@ export default function Ventures() {
       {/* ── Header ── */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
         <h1 style={{ fontSize: 20, fontWeight: 700 }}>Ventures</h1>
-        <button className="btn btn-primary" onClick={() => setShowAdd(true)}>+ New</button>
+        <button className="btn btn-primary" onClick={() => { setAddPrefill(undefined); setShowAdd(true); }}>+ New</button>
       </div>
 
       {/* ── Summary ── */}
@@ -123,6 +130,7 @@ export default function Ventures() {
                     key={v.purchase_id}
                     venture={v}
                     onAction={handleAction}
+                    onRegradeAnalysis={onRegradeAnalysis}
                   />
                 ))}
               </div>
@@ -135,8 +143,9 @@ export default function Ventures() {
       {showAdd && (
         <Modal title="Log Purchase" onClose={() => setShowAdd(false)}>
           <AddVentureForm
-            onDone={async () => { setShowAdd(false); await reload(); }}
-            onCancel={() => setShowAdd(false)}
+            prefill={addPrefill}
+            onDone={async () => { setShowAdd(false); setAddPrefill(undefined); await reload(); }}
+            onCancel={() => { setShowAdd(false); setAddPrefill(undefined); }}
           />
         </Modal>
       )}
@@ -179,9 +188,11 @@ export default function Ventures() {
 function VentureCard({
   venture: v,
   onAction,
+  onRegradeAnalysis,
 }: {
   venture: Venture;
   onAction: (v: Venture, t: "submit" | "result" | "sell") => void;
+  onRegradeAnalysis?: (cert: string) => void;
 }) {
   const cost = totalCost(v);
   const gradeStr = (v.result_grade ?? v.grade) ? `${(v.result_company ?? v.company ?? "psa").toUpperCase()} ${v.result_grade ?? v.grade}` : null;
@@ -230,9 +241,19 @@ function VentureCard({
             </button>
           )}
           {v.stage === "graded" && (
-            <button className="btn btn-sm btn-primary" onClick={() => onAction(v, "sell")}>
-              Record Sale →
-            </button>
+            <div style={{ display: "flex", gap: 8 }}>
+              {onRegradeAnalysis && (v.result_cert_number ?? v.cert_number) && (
+                <button
+                  className="btn btn-sm"
+                  onClick={() => onRegradeAnalysis((v.result_cert_number ?? v.cert_number)!)}
+                >
+                  Regrade Analysis
+                </button>
+              )}
+              <button className="btn btn-sm btn-primary" onClick={() => onAction(v, "sell")}>
+                Record Sale →
+              </button>
+            </div>
           )}
         </div>
       )}
@@ -242,11 +263,11 @@ function VentureCard({
 
 // ── Add venture form ──────────────────────────────────────────────────────────
 
-function AddVentureForm({ onDone, onCancel }: { onDone: () => Promise<void>; onCancel: () => void }) {
-  const [cardName, setCardName] = useState("");
-  const [setCode, setSetCode] = useState("");
-  const [cardNumber, setCardNumber] = useState("");
-  const [certNumber, setCertNumber] = useState("");
+function AddVentureForm({ prefill, onDone, onCancel }: { prefill?: Partial<CreateVentureParams>; onDone: () => Promise<void>; onCancel: () => void }) {
+  const [cardName, setCardName] = useState(prefill?.card_name ?? "");
+  const [setCode, setSetCode] = useState(prefill?.set_code ?? "");
+  const [cardNumber, setCardNumber] = useState(prefill?.card_number ?? "");
+  const [certNumber, setCertNumber] = useState(prefill?.cert_number ?? "");
   const [priceDollars, setPriceDollars] = useState("");
   const [shippingDollars, setShippingDollars] = useState("");
   const [source, setSource] = useState("ebay");
@@ -265,6 +286,7 @@ function AddVentureForm({ onDone, onCancel }: { onDone: () => Promise<void>; onC
     setError(null);
     try {
       await createVenture({
+        market_tracker_card_id: prefill?.market_tracker_card_id,
         card_name: cardName.trim(),
         set_code: setCode.trim().toUpperCase(),
         card_number: cardNumber.trim() || undefined,

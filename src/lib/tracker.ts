@@ -148,6 +148,29 @@ export async function submitReview(params: SubmitReviewParams): Promise<{ id: st
   return res.json() as Promise<{ id: string }>;
 }
 
+// ── Prior review for a cert ───────────────────────────────────────────────────
+
+export interface PriorReview {
+  id: string;
+  classification: ReviewClassification;
+  centering?: number;
+  surface?: number;
+  edges?: number;
+  corners?: number;
+  notes?: string;
+  review_date: string;
+  reviewer: string;
+}
+
+export async function fetchPriorReview(certNumber: string): Promise<PriorReview | null> {
+  const res = await fetch(`${API_BASE}/v1/reviews/cert/${encodeURIComponent(certNumber)}`, {
+    headers: { Authorization: `Bearer ${API_TOKEN}` },
+  });
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(`Prior review fetch failed (${res.status})`);
+  return res.json() as Promise<PriorReview>;
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 export function formatCents(cents: number | undefined | null): string {

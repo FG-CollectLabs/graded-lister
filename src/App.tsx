@@ -5,6 +5,7 @@ import Decision from "./pages/Decision";
 import ListingBuilder from "./pages/ListingBuilder";
 import Ventures from "./pages/Ventures";
 import type { PSACert } from "./lib/psa";
+import type { CreateVentureParams } from "./lib/ventures";
 
 const OWNER_EMAIL = import.meta.env.VITE_OWNER_EMAIL;
 
@@ -21,6 +22,8 @@ export default function App() {
   const [authError, setAuthError] = useState<string | null>(null);
   const [view, setView] = useState<View>("lookup");
   const [listing, setListing] = useState<ListingState | null>(null);
+  const [venturePrefill, setVenturePrefill] = useState<Partial<CreateVentureParams> | undefined>();
+  const [certPrefill, setCertPrefill] = useState<string | undefined>();
 
   useEffect(() => {
     return onAuthStateChanged(auth, setUser);
@@ -123,10 +126,19 @@ export default function App() {
 
       <main style={{ gridArea: "nav / nav / main / main", overflow: "hidden", display: "flex", flexDirection: "column" }}>
         {view === "ventures" ? (
-          <Ventures />
+          <Ventures
+            prefill={venturePrefill}
+            onRegradeAnalysis={(cert) => {
+              setCertPrefill(cert);
+              setListing(null);
+              setView("lookup");
+            }}
+          />
         ) : view === "lookup" ? (
           <CertLookup
+            initialCert={certPrefill}
             onReady={(cert, frontUrl, backUrl) => {
+              setCertPrefill(undefined);
               setListing({ cert, frontUrl, backUrl });
               setView("decision");
             }}
@@ -138,6 +150,10 @@ export default function App() {
             backUrl={listing.backUrl}
             onNext={() => setView("listing")}
             onBack={() => setView("lookup")}
+            onLogPurchase={(prefill) => {
+              setVenturePrefill(prefill);
+              setView("ventures");
+            }}
           />
         ) : listing && view === "listing" ? (
           <ListingBuilder
