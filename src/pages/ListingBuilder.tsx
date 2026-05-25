@@ -20,7 +20,13 @@ export default function ListingBuilder({ cert, frontUrl, backUrl, onBack }: Prop
   const [paymentProfile, setPaymentProfile] = useState("");
   const [exported, setExported] = useState(false);
 
-  const picUrls = [frontUrl, backUrl].filter((u): u is string => u !== null);
+  // Order: user photos (front, back) first, then PSA registry stock images
+  const psaStockUrls = cert.PSAImages
+    .sort((a, b) => (b.IsFront ? 1 : 0) - (a.IsFront ? 1 : 0))
+    .map((img) => img.ImageURL)
+    .filter(Boolean);
+  const picUrls = [...[frontUrl, backUrl].filter((u): u is string => u !== null), ...psaStockUrls]
+    .slice(0, 12);
 
   const handleExport = () => {
     const row = buildRow(cert, {
@@ -66,11 +72,11 @@ export default function ListingBuilder({ cert, frontUrl, backUrl, onBack }: Prop
             <div className="image-placeholder">No back</div>
           )}
         </div>
-        {picUrls.length > 0 && (
-          <p className="form-hint" style={{ marginTop: 10 }}>
-            {picUrls.length} image{picUrls.length > 1 ? "s" : ""} will be included in the CSV.
-          </p>
-        )}
+        <p className="form-hint" style={{ marginTop: 10 }}>
+          {picUrls.length > 0
+            ? `${picUrls.length} image${picUrls.length > 1 ? "s" : ""} will be included: ${[frontUrl, backUrl].filter(Boolean).length} photo${[frontUrl, backUrl].filter(Boolean).length !== 1 ? "s" : ""} + ${psaStockUrls.length} PSA stock`
+            : "No images — fetch card images above to include photos in the listing."}
+        </p>
       </div>
 
       {/* ── Listing form ──────────────────────────────────────────── */}

@@ -4,16 +4,18 @@ import type { PSACert } from "./psa";
 // Spec: https://developer.ebay.com/devzone/file-exchange/docs/FlatFileOverview.html
 
 export interface EbayListingRow {
+  sku: string;
   title: string;
   categoryId: string;
   price: string;
   quantity: string;
   conditionId: string;
   description: string;
-  picUrls: string[];   // up to 12 URLs
+  picUrls: string[];   // up to 12 URLs, pipe-separated in CSV
   shippingProfile: string;
   returnProfile: string;
   paymentProfile: string;
+  location: string;
   // PSA-specific item specifics
   gradingService: string;
   grade: string;
@@ -39,6 +41,7 @@ const CONDITION_ID = "3000";
 
 export function buildRow(cert: PSACert, overrides: Partial<EbayListingRow>): EbayListingRow {
   return {
+    sku: overrides.sku ?? cert.CertNumber,
     title: overrides.title ?? "",
     categoryId: overrides.categoryId ?? EBAY_CATEGORIES[0]!.id,
     price: overrides.price ?? "",
@@ -49,6 +52,7 @@ export function buildRow(cert: PSACert, overrides: Partial<EbayListingRow>): Eba
     shippingProfile: overrides.shippingProfile ?? "",
     returnProfile: overrides.returnProfile ?? "",
     paymentProfile: overrides.paymentProfile ?? "",
+    location: overrides.location ?? "",
     gradingService: "PSA",
     grade: cert.CardGrade,
     certNumber: cert.CertNumber,
@@ -65,18 +69,25 @@ function escapeCsv(val: string): string {
   return val;
 }
 
+// First column must contain the site/currency metadata for eBay to recognize the template.
+const ACTION_HEADER = "Action(SiteID=US|Country=US|Currency=USD|Version=1193|CC=UTF-8)";
+
 const HEADERS = [
-  "*Action",
-  "*Title",
-  "*Category",
-  "StartPrice",
-  "*Quantity",
-  "*ConditionID",
+  ACTION_HEADER,
+  "Custom label (SKU)",
+  "Category ID",
+  "Title",
+  "UPC",
+  "Price",
+  "Quantity",
+  "Item photo URL",
+  "Condition ID",
   "Description",
-  "PicURL",
-  "*PaymentProfileName",
-  "*ShippingProfileName",
-  "*ReturnProfileName",
+  "Format",
+  "ShippingProfileName",
+  "ReturnProfileName",
+  "PaymentProfileName",
+  "Location",
   "C:Grading Service",
   "C:Grade",
   "C:Certification Number",
@@ -86,21 +97,25 @@ const HEADERS = [
 ];
 
 export function generateCsv(rows: EbayListingRow[]): string {
-  const lines: string[] = [HEADERS.join(",")];
+  const lines: string[] = [HEADERS.map(escapeCsv).join(",")];
 
   for (const row of rows) {
     const cells = [
       "Add",
-      row.title,
+      row.sku,
       row.categoryId,
+      row.title,
+      "",                           // UPC — blank for TCG cards
       row.price,
       row.quantity,
+      row.picUrls.slice(0, 12).join("|"),  // max 12 images, | separated
       row.conditionId,
       row.description,
-      row.picUrls.join("|"),  // eBay File Exchange uses | to separate multiple images
-      row.paymentProfile,
+      "FixedPrice",
       row.shippingProfile,
       row.returnProfile,
+      row.paymentProfile,
+      row.location,
       row.gradingService,
       row.grade,
       row.certNumber,
