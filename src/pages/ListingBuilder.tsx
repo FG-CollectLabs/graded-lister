@@ -10,6 +10,45 @@ interface Props {
   onBack: () => void;
 }
 
+function buildEbayQuery(cert: PSACert): string {
+  const parts = [
+    `PSA ${cert.CardGrade}`,
+    cert.Year,
+    cert.Subject,
+    cert.CardNumber ? `#${cert.CardNumber}` : "",
+    cert.Brand,
+  ].filter(Boolean);
+  return parts.join(" ");
+}
+
+function EbayLinks({ cert }: { cert: PSACert }) {
+  const q = encodeURIComponent(buildEbayQuery(cert));
+  const sold = `https://www.ebay.com/sch/i.html?_nkw=${q}&LH_Complete=1&LH_Sold=1&LH_ItemCondition=3000&_sop=13`;
+  const active = `https://www.ebay.com/sch/i.html?_nkw=${q}&LH_ItemCondition=3000&_sop=15`;
+  const linkStyle: React.CSSProperties = {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 6,
+    fontSize: 13,
+    color: "var(--accent)",
+    textDecoration: "none",
+    padding: "6px 12px",
+    border: "1px solid var(--accent)",
+    borderRadius: 6,
+    fontWeight: 500,
+  };
+  return (
+    <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+      <a href={sold} target="_blank" rel="noreferrer" style={linkStyle}>
+        📉 eBay Sold (90d)
+      </a>
+      <a href={active} target="_blank" rel="noreferrer" style={linkStyle}>
+        🏷️ eBay Active Listings
+      </a>
+    </div>
+  );
+}
+
 export default function ListingBuilder({ cert, frontUrl, backUrl, onBack }: Props) {
   const [title, setTitle] = useState(() => buildTitle(cert));
   const [price, setPrice] = useState("");
@@ -98,6 +137,11 @@ export default function ListingBuilder({ cert, frontUrl, backUrl, onBack }: Prop
             {title.length > 80 && (
               <span className="form-hint" style={{ color: "var(--bad)" }}>Title exceeds 80-character eBay limit</span>
             )}
+          </div>
+
+          <div className="form-group full-width">
+            <label className="form-label">Price Research</label>
+            <EbayLinks cert={cert} />
           </div>
 
           <div className="form-group">
