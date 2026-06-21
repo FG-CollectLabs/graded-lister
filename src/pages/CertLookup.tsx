@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import { lookupCert, fetchAndStoreImages, type PSACert } from "../lib/psa";
+import { lookupCert, fetchAndStoreImages, uploadCapturedImage, type PSACert } from "../lib/psa";
 import { startCertQrScan, type ScanController } from "../lib/qrScan";
+import { openCamera, captureFrame } from "../lib/imageCapture";
 
 interface Props {
   initialCert?: string;
@@ -19,6 +20,13 @@ export default function CertLookup({ initialCert, onReady }: Props) {
   const [scanning, setScanning] = useState(false);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const scanCtrlRef = useRef<ScanController | null>(null);
+
+  // Manual image capture (fallback when PSA API has no TrueGrade images).
+  const [captureSide, setCaptureSide] = useState<"front" | "back" | null>(null);
+  const [capturePreview, setCapturePreview] = useState<{ blob: Blob; url: string } | null>(null);
+  const [uploadingSide, setUploadingSide] = useState<"front" | "back" | null>(null);
+  const captureVideoRef = useRef<HTMLVideoElement | null>(null);
+  const captureStreamRef = useRef<MediaStream | null>(null);
 
   // Auto-trigger lookup when arriving from Ventures with a pre-filled cert.
   useEffect(() => {
@@ -75,6 +83,90 @@ export default function CertLookup({ initialCert, onReady }: Props) {
     scanCtrlRef.current = null;
     setScanning(false);
   };
+
+  const stopCaptureStream = () => {
+    captureStreamRef.current?.getTracks().forEach((t) => t.stop());
+    captureStreamRef.current = null;
+  };
+
+  const startCapture = async (side: "front" | "back") => {
+    setError(null);
+    setCapturePreview(null);
+    setCaptureSide(side);
+    await new Promise((r) => requestAnimationFrame(r));
+    try {
+      const stream = await openCamera();
+      captureStreamRef.current = stream;
+      if (captureVideoRef.current) {
+        captureVideoRef.current.srcObject = stream;
+        captureVideoRef.current.setAttribute("playsinline", "true");
+        await captureVideoRef.current.play();
+      }
+    } catch (e) {
+      setError(`Camera error: ${(e as Error).message}`);
+      setCaptureSide(null);
+    }
+  };
+
+  const cancelCapture = () => {
+    stopCaptureStream();
+    if (capturePreview) URL.revokeObjectURL(capturePreview.url);
+    setCapturePreview(null);
+    setCaptureSide(null);
+  };
+
+  const takeShot = async () => {
+    if (!captureVideoRef.current) return;
+    try {
+      const blob = await captureFrame(captureVideoRef.current);
+      const url = URL.createObjectURL(blob);
+      setCapturePreview({ blob, url });
+      stopCaptureStream();
+    } catch (e) {
+      setError(`Capture failed: ${(e as Error).message}`);
+    }
+  };
+
+  const retake = async () => {
+    if (capturePreview) URL.revokeObjectURL(capturePreview.url);
+    setCapturePreview(null);
+    if (!captureSide) return;
+    try {
+      const stream = await openCamera();
+      captureStreamRef.current = stream;
+      if (captureVideoRef.current) {
+        captureVideoRef.current.srcObject = stream;
+        await captureVideoRef.current.play();
+      }
+    } catch (e) {
+      setError(`Camera error: ${(e as Error).message}`);
+    }
+  };
+
+  const useShot = async () => {
+    if (!cert || !capturePreview || !captureSide) return;
+    setUploadingSide(captureSide);
+    try {
+      const url = await uploadCapturedImage(cert.CertNumber, captureSide, capturePreview.blob);
+      if (captureSide === "front") setFrontUrl(url);
+      else setBackUrl(url);
+      URL.revokeObjectURL(capturePreview.url);
+      setCapturePreview(null);
+      setCaptureSide(null);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setUploadingSide(null);
+    }
+  };
+
+  useEffect(() => {
+    return () => {
+      stopCaptureStream();
+      if (capturePreview) URL.revokeObjectURL(capturePreview.url);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleLookup = async () => {
     if (!certInput.trim()) return;
@@ -175,6 +267,59 @@ export default function CertLookup({ initialCert, onReady }: Props) {
             Downloading card images and uploading to storage…
           </p>
         )}
+
+        {captureSide && (
+          <div
+            style={{
+              position: "fixed",
+              inset: 0,
+              background: "rgba(0,0,0,0.9)",
+              zIndex: 1000,
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              justifyContent: "center",
+              padding: 16,
+            }}
+          >
+            <p style={{ color: "#fff", marginBottom: 8, fontSize: 14 }}>
+              Capture <strong>{captureSide}</strong> of slab
+            </p>
+            {capturePreview ? (
+              <img
+                src={capturePreview.url}
+                alt="preview"
+                style={{ width: "100%", maxWidth: 480, borderRadius: 8, background: "#000" }}
+              />
+            ) : (
+              <video
+                ref={captureVideoRef}
+                style={{ width: "100%", maxWidth: 480, borderRadius: 8, background: "#000" }}
+                muted
+                playsInline
+              />
+            )}
+            <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
+              {capturePreview ? (
+                <>
+                  <button
+                    className="btn btn-primary"
+                    onClick={() => void useShot()}
+                    disabled={uploadingSide !== null}
+                  >
+                    {uploadingSide ? "Uploading…" : "Use Photo"}
+                  </button>
+                  <button className="btn" onClick={() => void retake()}>Retake</button>
+                </>
+              ) : (
+                <button className="btn btn-primary" onClick={() => void takeShot()}>
+                  Take Photo
+                </button>
+              )}
+              <button className="btn" onClick={cancelCapture}>Cancel</button>
+            </div>
+          </div>
+        )}
       </div>
 
       {error && <div className="error-banner">{error}</div>}
@@ -188,15 +333,47 @@ export default function CertLookup({ initialCert, onReady }: Props) {
               {frontUrl ? (
                 <img className="image-thumb" src={frontUrl} alt="Card front" />
               ) : (
-                <div className="image-placeholder">
-                  {phase === "fetching-images" ? <span className="spinner" /> : "No front image"}
+                <div
+                  className="image-placeholder"
+                  style={{ display: "flex", flexDirection: "column", gap: 8, padding: 12 }}
+                >
+                  {phase === "fetching-images" ? (
+                    <span className="spinner" />
+                  ) : uploadingSide === "front" ? (
+                    <span className="spinner" />
+                  ) : (
+                    <>
+                      <span style={{ fontSize: 11, color: "var(--text-dim)" }}>No front image</span>
+                      {phase === "done" && (
+                        <button className="btn btn-sm" onClick={() => void startCapture("front")}>
+                          📷 Capture
+                        </button>
+                      )}
+                    </>
+                  )}
                 </div>
               )}
               {backUrl ? (
                 <img className="image-thumb" src={backUrl} alt="Card back" />
               ) : (
-                <div className="image-placeholder">
-                  {phase === "fetching-images" ? <span className="spinner" /> : "No back image"}
+                <div
+                  className="image-placeholder"
+                  style={{ display: "flex", flexDirection: "column", gap: 8, padding: 12 }}
+                >
+                  {phase === "fetching-images" ? (
+                    <span className="spinner" />
+                  ) : uploadingSide === "back" ? (
+                    <span className="spinner" />
+                  ) : (
+                    <>
+                      <span style={{ fontSize: 11, color: "var(--text-dim)" }}>No back image</span>
+                      {phase === "done" && (
+                        <button className="btn btn-sm" onClick={() => void startCapture("back")}>
+                          📷 Capture
+                        </button>
+                      )}
+                    </>
+                  )}
                 </div>
               )}
             </div>

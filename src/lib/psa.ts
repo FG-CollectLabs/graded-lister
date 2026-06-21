@@ -52,6 +52,32 @@ export async function fetchAndStoreImages(
   return res.json() as Promise<{ frontUrl: string | null; backUrl: string | null }>;
 }
 
+export async function uploadCapturedImage(
+  certNumber: string,
+  side: "front" | "back",
+  blob: Blob,
+): Promise<string> {
+  const res = await fetch(
+    `${API_BASE}/v1/cert/${encodeURIComponent(certNumber)}/images/upload?side=${side}`,
+    {
+      method: "POST",
+      headers: {
+        ...authHeaders(),
+        "Content-Type": blob.type || "image/jpeg",
+      },
+      body: blob,
+    },
+  );
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Image upload failed (${res.status}): ${text}`);
+  }
+  const data = (await res.json()) as { frontUrl?: string; backUrl?: string };
+  const url = side === "front" ? data.frontUrl : data.backUrl;
+  if (!url) throw new Error("Upload succeeded but no URL returned");
+  return url;
+}
+
 export function buildTitle(cert: PSACert): string {
   const parts = [
     cert.Year,
