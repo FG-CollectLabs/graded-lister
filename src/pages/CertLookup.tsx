@@ -1,7 +1,12 @@
 import { useEffect, useRef, useState } from "react";
-import { lookupCert, fetchAndStoreImages, uploadCapturedImage, type PSACert } from "../lib/psa";
+import {
+  lookupCert,
+  fetchAndStoreImages,
+  uploadImageFile,
+  uploadImageFromUrl,
+  type PSACert,
+} from "../lib/psa";
 import { startCertQrScan, type ScanController } from "../lib/qrScan";
-import { openCamera, captureFrame } from "../lib/imageCapture";
 
 interface Props {
   initialCert?: string;
@@ -17,16 +22,10 @@ export default function CertLookup({ initialCert, onReady }: Props) {
   const [cert, setCert] = useState<PSACert | null>(null);
   const [frontUrl, setFrontUrl] = useState<string | null>(null);
   const [backUrl, setBackUrl] = useState<string | null>(null);
+
   const [scanning, setScanning] = useState(false);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const scanCtrlRef = useRef<ScanController | null>(null);
-
-  // Manual image capture (fallback when PSA API has no TrueGrade images).
-  const [captureSide, setCaptureSide] = useState<"front" | "back" | null>(null);
-  const [capturePreview, setCapturePreview] = useState<{ blob: Blob; url: string } | null>(null);
-  const [uploadingSide, setUploadingSide] = useState<"front" | "back" | null>(null);
-  const captureVideoRef = useRef<HTMLVideoElement | null>(null);
-  const captureStreamRef = useRef<MediaStream | null>(null);
 
   // Auto-trigger lookup when arriving from Ventures with a pre-filled cert.
   useEffect(() => {
@@ -62,7 +61,6 @@ export default function CertLookup({ initialCert, onReady }: Props) {
   const startScan = async () => {
     setError(null);
     setScanning(true);
-    // Wait a tick so the video element mounts before we attach the stream.
     await new Promise((r) => requestAnimationFrame(r));
     if (!videoRef.current) return;
     scanCtrlRef.current = await startCertQrScan(
@@ -84,111 +82,9 @@ export default function CertLookup({ initialCert, onReady }: Props) {
     setScanning(false);
   };
 
-  const stopCaptureStream = () => {
-    captureStreamRef.current?.getTracks().forEach((t) => t.stop());
-    captureStreamRef.current = null;
-  };
-
-  const startCapture = async (side: "front" | "back") => {
-    setError(null);
-    setCapturePreview(null);
-    setCaptureSide(side);
-    await new Promise((r) => requestAnimationFrame(r));
-    try {
-      const stream = await openCamera();
-      captureStreamRef.current = stream;
-      if (captureVideoRef.current) {
-        captureVideoRef.current.srcObject = stream;
-        captureVideoRef.current.setAttribute("playsinline", "true");
-        await captureVideoRef.current.play();
-      }
-    } catch (e) {
-      setError(`Camera error: ${(e as Error).message}`);
-      setCaptureSide(null);
-    }
-  };
-
-  const cancelCapture = () => {
-    stopCaptureStream();
-    if (capturePreview) URL.revokeObjectURL(capturePreview.url);
-    setCapturePreview(null);
-    setCaptureSide(null);
-  };
-
-  const takeShot = async () => {
-    if (!captureVideoRef.current) return;
-    try {
-      const blob = await captureFrame(captureVideoRef.current);
-      const url = URL.createObjectURL(blob);
-      setCapturePreview({ blob, url });
-      stopCaptureStream();
-    } catch (e) {
-      setError(`Capture failed: ${(e as Error).message}`);
-    }
-  };
-
-  const retake = async () => {
-    if (capturePreview) URL.revokeObjectURL(capturePreview.url);
-    setCapturePreview(null);
-    if (!captureSide) return;
-    try {
-      const stream = await openCamera();
-      captureStreamRef.current = stream;
-      if (captureVideoRef.current) {
-        captureVideoRef.current.srcObject = stream;
-        await captureVideoRef.current.play();
-      }
-    } catch (e) {
-      setError(`Camera error: ${(e as Error).message}`);
-    }
-  };
-
-  const useShot = async () => {
-    if (!cert || !capturePreview || !captureSide) return;
-    setUploadingSide(captureSide);
-    try {
-      const url = await uploadCapturedImage(cert.CertNumber, captureSide, capturePreview.blob);
-      if (captureSide === "front") setFrontUrl(url);
-      else setBackUrl(url);
-      URL.revokeObjectURL(capturePreview.url);
-      setCapturePreview(null);
-      setCaptureSide(null);
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setUploadingSide(null);
-    }
-  };
-
-  useEffect(() => {
-    return () => {
-      stopCaptureStream();
-      if (capturePreview) URL.revokeObjectURL(capturePreview.url);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
   const handleLookup = async () => {
     if (!certInput.trim()) return;
-    setError(null);
-    setCert(null);
-    setFrontUrl(null);
-    setBackUrl(null);
-    setPhase("looking-up");
-
-    try {
-      const psaCert = await lookupCert(certInput);
-      setCert(psaCert);
-      setPhase("fetching-images");
-
-      const { frontUrl: fUrl, backUrl: bUrl } = await fetchAndStoreImages(psaCert.CertNumber);
-      setFrontUrl(fUrl);
-      setBackUrl(bUrl);
-      setPhase("done");
-    } catch (e) {
-      setError((e as Error).message);
-      setPhase("error");
-    }
+    await handleLookupCert(certInput);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -238,15 +134,8 @@ export default function CertLookup({ initialCert, onReady }: Props) {
         {scanning && (
           <div
             style={{
-              position: "fixed",
-              inset: 0,
-              background: "rgba(0,0,0,0.85)",
-              zIndex: 1000,
-              display: "flex",
-              flexDirection: "column",
-              alignItems: "center",
-              justifyContent: "center",
-              padding: 16,
+              position: "fixed", inset: 0, background: "rgba(0,0,0,0.85)", zIndex: 1000,
+              display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 16,
             }}
           >
             <video
@@ -257,68 +146,14 @@ export default function CertLookup({ initialCert, onReady }: Props) {
             <p style={{ color: "#fff", marginTop: 12, fontSize: 14 }}>
               Point camera at the PSA slab QR code
             </p>
-            <button className="btn" onClick={stopScan} style={{ marginTop: 12 }}>
-              Cancel
-            </button>
+            <button className="btn" onClick={stopScan} style={{ marginTop: 12 }}>Cancel</button>
           </div>
         )}
+
         {phase === "fetching-images" && (
           <p style={{ fontSize: 12, color: "var(--text-dim)", marginTop: 10 }}>
             Downloading card images and uploading to storage…
           </p>
-        )}
-
-        {captureSide && (
-          <div
-            style={{
-              position: "fixed",
-              inset: 0,
-              background: "rgba(0,0,0,0.9)",
-              zIndex: 1000,
-              display: "flex",
-              flexDirection: "column",
-              alignItems: "center",
-              justifyContent: "center",
-              padding: 16,
-            }}
-          >
-            <p style={{ color: "#fff", marginBottom: 8, fontSize: 14 }}>
-              Capture <strong>{captureSide}</strong> of slab
-            </p>
-            {capturePreview ? (
-              <img
-                src={capturePreview.url}
-                alt="preview"
-                style={{ width: "100%", maxWidth: 480, borderRadius: 8, background: "#000" }}
-              />
-            ) : (
-              <video
-                ref={captureVideoRef}
-                style={{ width: "100%", maxWidth: 480, borderRadius: 8, background: "#000" }}
-                muted
-                playsInline
-              />
-            )}
-            <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
-              {capturePreview ? (
-                <>
-                  <button
-                    className="btn btn-primary"
-                    onClick={() => void useShot()}
-                    disabled={uploadingSide !== null}
-                  >
-                    {uploadingSide ? "Uploading…" : "Use Photo"}
-                  </button>
-                  <button className="btn" onClick={() => void retake()}>Retake</button>
-                </>
-              ) : (
-                <button className="btn btn-primary" onClick={() => void takeShot()}>
-                  Take Photo
-                </button>
-              )}
-              <button className="btn" onClick={cancelCapture}>Cancel</button>
-            </div>
-          </div>
         )}
       </div>
 
@@ -330,52 +165,24 @@ export default function CertLookup({ initialCert, onReady }: Props) {
 
           <div style={{ display: "flex", gap: 24, flexWrap: "wrap" }}>
             <div className="image-strip">
-              {frontUrl ? (
-                <img className="image-thumb" src={frontUrl} alt="Card front" />
-              ) : (
-                <div
-                  className="image-placeholder"
-                  style={{ display: "flex", flexDirection: "column", gap: 8, padding: 12 }}
-                >
-                  {phase === "fetching-images" ? (
-                    <span className="spinner" />
-                  ) : uploadingSide === "front" ? (
-                    <span className="spinner" />
-                  ) : (
-                    <>
-                      <span style={{ fontSize: 11, color: "var(--text-dim)" }}>No front image</span>
-                      {phase === "done" && (
-                        <button className="btn btn-sm" onClick={() => void startCapture("front")}>
-                          📷 Capture
-                        </button>
-                      )}
-                    </>
-                  )}
-                </div>
-              )}
-              {backUrl ? (
-                <img className="image-thumb" src={backUrl} alt="Card back" />
-              ) : (
-                <div
-                  className="image-placeholder"
-                  style={{ display: "flex", flexDirection: "column", gap: 8, padding: 12 }}
-                >
-                  {phase === "fetching-images" ? (
-                    <span className="spinner" />
-                  ) : uploadingSide === "back" ? (
-                    <span className="spinner" />
-                  ) : (
-                    <>
-                      <span style={{ fontSize: 11, color: "var(--text-dim)" }}>No back image</span>
-                      {phase === "done" && (
-                        <button className="btn btn-sm" onClick={() => void startCapture("back")}>
-                          📷 Capture
-                        </button>
-                      )}
-                    </>
-                  )}
-                </div>
-              )}
+              <ImageSlot
+                label="Front"
+                side="front"
+                certNumber={cert.CertNumber}
+                url={frontUrl}
+                disabled={phase !== "done"}
+                onUploaded={setFrontUrl}
+                onError={setError}
+              />
+              <ImageSlot
+                label="Back"
+                side="back"
+                certNumber={cert.CertNumber}
+                url={backUrl}
+                disabled={phase !== "done"}
+                onUploaded={setBackUrl}
+                onError={setError}
+              />
             </div>
 
             <div style={{ flex: 1, minWidth: 220 }}>
@@ -386,37 +193,35 @@ export default function CertLookup({ initialCert, onReady }: Props) {
                 </div>
                 <div className="cert-field">
                   <label>Grade Description</label>
-                  <div className="value">
-                    <span className="badge badge-psa">{cert.GradeDescription}</span>
-                  </div>
+                  <div className="value"><span className="badge badge-psa">{cert.GradeDescription}</span></div>
                 </div>
                 <div className="cert-field">
                   <label>Cert Number</label>
                   <div className="value" style={{ fontFamily: "monospace", fontSize: 12 }}>{cert.CertNumber}</div>
                 </div>
-                <div className="cert-field">
-                  <label>Subject</label>
-                  <div className="value">{cert.Subject}</div>
-                </div>
-                <div className="cert-field">
-                  <label>Brand</label>
-                  <div className="value">{cert.Brand}</div>
-                </div>
-                <div className="cert-field">
-                  <label>Set</label>
-                  <div className="value">{cert.VarietySet}</div>
-                </div>
-                <div className="cert-field">
-                  <label>Card #</label>
-                  <div className="value">{cert.CardNumber || "—"}</div>
-                </div>
-                <div className="cert-field">
-                  <label>Year</label>
-                  <div className="value">{cert.Year}</div>
-                </div>
+                <div className="cert-field"><label>Subject</label><div className="value">{cert.Subject}</div></div>
+                <div className="cert-field"><label>Brand</label><div className="value">{cert.Brand}</div></div>
+                <div className="cert-field"><label>Set</label><div className="value">{cert.VarietySet}</div></div>
+                <div className="cert-field"><label>Card #</label><div className="value">{cert.CardNumber || "—"}</div></div>
+                <div className="cert-field"><label>Year</label><div className="value">{cert.Year}</div></div>
               </div>
             </div>
           </div>
+
+          {(!frontUrl || !backUrl) && phase === "done" && (
+            <p style={{ fontSize: 12, color: "var(--text-dim)", marginTop: 12 }}>
+              PSA has no API images for this cert. Open{" "}
+              <a
+                href={`https://www.psacard.com/cert/${cert.CertNumber}`}
+                target="_blank"
+                rel="noreferrer"
+                style={{ color: "var(--accent)" }}
+              >
+                psacard.com/cert/{cert.CertNumber}
+              </a>{" "}
+              and right-click → Copy Image Address, then paste below. Or drop a local image file.
+            </p>
+          )}
 
           {phase === "done" && (
             <div style={{ marginTop: 20, display: "flex", justifyContent: "flex-end" }}>
@@ -426,6 +231,124 @@ export default function CertLookup({ initialCert, onReady }: Props) {
             </div>
           )}
         </div>
+      )}
+    </div>
+  );
+}
+
+// ── ImageSlot ────────────────────────────────────────────────────────────────
+
+interface ImageSlotProps {
+  label: string;
+  side: "front" | "back";
+  certNumber: string;
+  url: string | null;
+  disabled: boolean;
+  onUploaded: (url: string) => void;
+  onError: (msg: string) => void;
+}
+
+function ImageSlot({ label, side, certNumber, url, disabled, onUploaded, onError }: ImageSlotProps) {
+  const [urlInput, setUrlInput] = useState("");
+  const [uploading, setUploading] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  if (url) {
+    return <img className="image-thumb" src={url} alt={`Card ${label.toLowerCase()}`} />;
+  }
+
+  const submitFile = async (file: File) => {
+    setUploading(true);
+    try {
+      const u = await uploadImageFile(certNumber, side, file);
+      onUploaded(u);
+    } catch (e) {
+      onError((e as Error).message);
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const submitUrl = async () => {
+    const v = urlInput.trim();
+    if (!v) return;
+    setUploading(true);
+    try {
+      const u = await uploadImageFromUrl(certNumber, side, v);
+      onUploaded(u);
+      setUrlInput("");
+    } catch (e) {
+      onError((e as Error).message);
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  return (
+    <div
+      className="image-placeholder"
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: 6,
+        padding: 8,
+        border: dragOver ? "2px dashed var(--accent)" : undefined,
+      }}
+      onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+      onDragLeave={() => setDragOver(false)}
+      onDrop={(e) => {
+        e.preventDefault();
+        setDragOver(false);
+        const file = e.dataTransfer.files?.[0];
+        if (file) void submitFile(file);
+      }}
+    >
+      <span style={{ fontSize: 11, color: "var(--text-dim)" }}>
+        No {label.toLowerCase()} image
+      </span>
+      {uploading ? (
+        <span className="spinner" />
+      ) : (
+        <>
+          <button
+            className="btn btn-sm"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={disabled}
+            style={{ width: "100%" }}
+          >
+            Drop or pick file
+          </button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            style={{ display: "none" }}
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) void submitFile(file);
+              e.target.value = "";
+            }}
+          />
+          <input
+            type="url"
+            className="form-input"
+            placeholder="paste PSA image URL"
+            value={urlInput}
+            onChange={(e) => setUrlInput(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") void submitUrl(); }}
+            disabled={disabled}
+            style={{ fontSize: 11, padding: "4px 6px" }}
+          />
+          <button
+            className="btn btn-sm"
+            onClick={() => void submitUrl()}
+            disabled={disabled || !urlInput.trim()}
+            style={{ width: "100%" }}
+          >
+            Fetch URL
+          </button>
+        </>
       )}
     </div>
   );

@@ -52,10 +52,10 @@ export async function fetchAndStoreImages(
   return res.json() as Promise<{ frontUrl: string | null; backUrl: string | null }>;
 }
 
-export async function uploadCapturedImage(
+export async function uploadImageFile(
   certNumber: string,
   side: "front" | "back",
-  blob: Blob,
+  file: File | Blob,
 ): Promise<string> {
   const res = await fetch(
     `${API_BASE}/v1/cert/${encodeURIComponent(certNumber)}/images/upload?side=${side}`,
@@ -63,14 +63,37 @@ export async function uploadCapturedImage(
       method: "POST",
       headers: {
         ...authHeaders(),
-        "Content-Type": blob.type || "image/jpeg",
+        "Content-Type": file.type || "image/jpeg",
       },
-      body: blob,
+      body: file,
     },
   );
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(`Image upload failed (${res.status}): ${text}`);
+    throw new Error(`Upload failed (${res.status}): ${text}`);
+  }
+  const data = (await res.json()) as { frontUrl?: string; backUrl?: string };
+  const url = side === "front" ? data.frontUrl : data.backUrl;
+  if (!url) throw new Error("Upload succeeded but no URL returned");
+  return url;
+}
+
+export async function uploadImageFromUrl(
+  certNumber: string,
+  side: "front" | "back",
+  imageUrl: string,
+): Promise<string> {
+  const res = await fetch(
+    `${API_BASE}/v1/cert/${encodeURIComponent(certNumber)}/images/from-url`,
+    {
+      method: "POST",
+      headers: { ...authHeaders(), "Content-Type": "application/json" },
+      body: JSON.stringify({ side, url: imageUrl }),
+    },
+  );
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Fetch-from-URL failed (${res.status}): ${text}`);
   }
   const data = (await res.json()) as { frontUrl?: string; backUrl?: string };
   const url = side === "front" ? data.frontUrl : data.backUrl;
