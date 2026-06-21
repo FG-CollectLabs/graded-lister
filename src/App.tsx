@@ -118,7 +118,19 @@ export default function App() {
             Build Listing
           </button>
         </div>
-        <span style={{ marginLeft: "auto", fontSize: 12, color: "var(--text-dim)" }}>{user.email}</span>
+        <span
+          title={`Build ${__APP_COMMIT__}`}
+          style={{
+            marginLeft: "auto",
+            fontSize: 10,
+            color: "var(--text-dim)",
+            fontFamily: "monospace",
+            opacity: 0.6,
+          }}
+        >
+          v{__APP_VERSION__}·{__APP_COMMIT__}
+        </span>
+        <span style={{ marginLeft: 12, fontSize: 12, color: "var(--text-dim)" }}>{user.email}</span>
         <button className="btn btn-sm" style={{ marginLeft: 12 }} onClick={() => void signOutUser()}>
           Sign out
         </button>

@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { lookupCert, fetchAndStoreImages, type PSACert } from "../lib/psa";
+import { startCertQrScan, type ScanController } from "../lib/qrScan";
 
 interface Props {
   initialCert?: string;
@@ -15,12 +16,65 @@ export default function CertLookup({ initialCert, onReady }: Props) {
   const [cert, setCert] = useState<PSACert | null>(null);
   const [frontUrl, setFrontUrl] = useState<string | null>(null);
   const [backUrl, setBackUrl] = useState<string | null>(null);
+  const [scanning, setScanning] = useState(false);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const scanCtrlRef = useRef<ScanController | null>(null);
 
   // Auto-trigger lookup when arriving from Ventures with a pre-filled cert.
   useEffect(() => {
     if (initialCert) void handleLookup();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    return () => scanCtrlRef.current?.stop();
+  }, []);
+
+  const handleLookupCert = async (certNumber: string) => {
+    setCertInput(certNumber);
+    setError(null);
+    setCert(null);
+    setFrontUrl(null);
+    setBackUrl(null);
+    setPhase("looking-up");
+    try {
+      const psaCert = await lookupCert(certNumber);
+      setCert(psaCert);
+      setPhase("fetching-images");
+      const { frontUrl: fUrl, backUrl: bUrl } = await fetchAndStoreImages(psaCert.CertNumber);
+      setFrontUrl(fUrl);
+      setBackUrl(bUrl);
+      setPhase("done");
+    } catch (e) {
+      setError((e as Error).message);
+      setPhase("error");
+    }
+  };
+
+  const startScan = async () => {
+    setError(null);
+    setScanning(true);
+    // Wait a tick so the video element mounts before we attach the stream.
+    await new Promise((r) => requestAnimationFrame(r));
+    if (!videoRef.current) return;
+    scanCtrlRef.current = await startCertQrScan(
+      videoRef.current,
+      (certNumber) => {
+        setScanning(false);
+        void handleLookupCert(certNumber);
+      },
+      (err) => {
+        setScanning(false);
+        setError(`Camera error: ${err.message}`);
+      },
+    );
+  };
+
+  const stopScan = () => {
+    scanCtrlRef.current?.stop();
+    scanCtrlRef.current = null;
+    setScanning(false);
+  };
 
   const handleLookup = async () => {
     if (!certInput.trim()) return;
@@ -69,15 +123,53 @@ export default function CertLookup({ initialCert, onReady }: Props) {
               disabled={busy}
             />
           </div>
-          <button
-            className="btn btn-primary"
-            onClick={() => void handleLookup()}
-            disabled={busy || !certInput.trim()}
-          >
-            {busy ? <span className="spinner" style={{ width: 14, height: 14, borderWidth: 2 }} /> : null}
-            {phase === "looking-up" ? "Looking up…" : phase === "fetching-images" ? "Fetching images…" : "Look Up"}
-          </button>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button
+              className="btn btn-primary"
+              onClick={() => void handleLookup()}
+              disabled={busy || !certInput.trim()}
+            >
+              {busy ? <span className="spinner" style={{ width: 14, height: 14, borderWidth: 2 }} /> : null}
+              {phase === "looking-up" ? "Looking up…" : phase === "fetching-images" ? "Fetching images…" : "Look Up"}
+            </button>
+            <button
+              className="btn"
+              onClick={() => void startScan()}
+              disabled={busy || scanning}
+              title="Scan PSA slab QR code"
+            >
+              📷 Scan QR
+            </button>
+          </div>
         </div>
+
+        {scanning && (
+          <div
+            style={{
+              position: "fixed",
+              inset: 0,
+              background: "rgba(0,0,0,0.85)",
+              zIndex: 1000,
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              justifyContent: "center",
+              padding: 16,
+            }}
+          >
+            <video
+              ref={videoRef}
+              style={{ width: "100%", maxWidth: 480, borderRadius: 8, background: "#000" }}
+              muted
+            />
+            <p style={{ color: "#fff", marginTop: 12, fontSize: 14 }}>
+              Point camera at the PSA slab QR code
+            </p>
+            <button className="btn" onClick={stopScan} style={{ marginTop: 12 }}>
+              Cancel
+            </button>
+          </div>
+        )}
         {phase === "fetching-images" && (
           <p style={{ fontSize: 12, color: "var(--text-dim)", marginTop: 10 }}>
             Downloading card images and uploading to storage…
